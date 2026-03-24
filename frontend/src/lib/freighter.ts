@@ -36,7 +36,7 @@ export async function signWithFreighter(
   networkPassphrase: string
 ): Promise<FreighterSignResponse> {
   try {
-    const { signedXDR } = await freighter.signTransaction(transactionXDR, {
+    const signedXDR = await freighter.signTransaction(transactionXDR, {
       networkPassphrase,
     });
 
@@ -66,7 +66,7 @@ export async function submitTransaction(
       networkPassphrase
     );
 
-    const result = await server.submitTransaction(signedTx.v0 || signedTx);
+    const result = await server.submitTransaction(signedTx);
     
     if (!result.hash) {
       throw new Error("No transaction hash returned");
