@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import CopyButton from "./CopyButton";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import {
+  useHydrateMerchantStore,
+  useMerchantApiKey,
+  useMerchantHydrated,
+} from "@/lib/merchant-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -29,15 +34,10 @@ export default function CreatePaymentForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedPayment | null>(null);
+  const apiKey = useMerchantApiKey();
+  const hydrated = useMerchantHydrated();
 
-  // Loaded from localStorage after hydration to avoid SSR mismatch
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    setApiKey(localStorage.getItem("merchant_api_key"));
-    setHydrated(true);
-  }, []);
+  useHydrateMerchantStore();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -51,7 +51,7 @@ export default function CreatePaymentForm() {
     }
     if (!STELLAR_ADDRESS_RE.test(recipient.trim())) {
       setError(
-        "Recipient must be a valid Stellar public key (56 characters, starts with G)."
+        "Recipient must be a valid Stellar public key (56 characters, starts with G).",
       );
       return;
     }
@@ -76,7 +76,8 @@ export default function CreatePaymentForm() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to create payment link");
+      if (!res.ok)
+        throw new Error(data.error ?? "Failed to create payment link");
 
       setCreated(data);
       toast.success("Payment link created!");
@@ -106,7 +107,9 @@ export default function CreatePaymentForm() {
   if (!apiKey) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-8 text-center">
-        <p className="text-base font-medium text-yellow-200">No API key found</p>
+        <p className="text-base font-medium text-yellow-200">
+          No API key found
+        </p>
         <p className="text-sm text-slate-400">
           Register a merchant account to get your API key and start creating
           payment links.

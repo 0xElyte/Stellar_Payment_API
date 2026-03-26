@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import "dotenv/config";
 import * as StellarSdk from "stellar-sdk";
 
 const NETWORK = (process.env.STELLAR_NETWORK || "testnet").toLowerCase();
@@ -9,6 +9,15 @@ const HORIZON_URL =
     : "https://horizon-testnet.stellar.org");
 
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
+
+export async function isHorizonReachable() {
+  try {
+    await server.ledgers().order("desc").limit(1).call();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function resolveAsset(assetCode, assetIssuer) {
   if (!assetCode) {
@@ -43,8 +52,7 @@ function paymentMatchesAsset(payment, asset) {
   }
 
   return (
-    payment.asset_code === asset.code &&
-    payment.asset_issuer === asset.issuer
+    payment.asset_code === asset.code && payment.asset_issuer === asset.issuer
   );
 }
 
@@ -56,7 +64,7 @@ function handleHorizonError(err, context = "") {
 
   if (status === 429) {
     const error = new Error(
-      "Horizon rate limit exceeded. Please retry after a short wait."
+      "Horizon rate limit exceeded. Please retry after a short wait.",
     );
     error.status = 429;
     return error;
@@ -64,7 +72,7 @@ function handleHorizonError(err, context = "") {
 
   if (status === 404) {
     const error = new Error(
-      `Stellar account not found${context ? `: ${context}` : ""}`
+      `Stellar account not found${context ? `: ${context}` : ""}`,
     );
     error.status = 404;
     return error;
@@ -79,7 +87,7 @@ function handleHorizonError(err, context = "") {
 
   if (status && status >= 500) {
     const error = new Error(
-      `Horizon server error (${status}). The Stellar network may be experiencing issues.`
+      `Horizon server error (${status}). The Stellar network may be experiencing issues.`,
     );
     error.status = 502;
     return error;
@@ -87,7 +95,7 @@ function handleHorizonError(err, context = "") {
 
   // Network / connection errors (ECONNREFUSED, timeout, etc.)
   const error = new Error(
-    `Unable to connect to Horizon (${HORIZON_URL}): ${err.message}`
+    `Unable to connect to Horizon (${HORIZON_URL}): ${err.message}`,
   );
   error.status = 502;
   return error;
@@ -111,7 +119,7 @@ export async function findMatchingPayment({
   assetCode,
   assetIssuer,
   memo,
-  memoType
+  memoType,
 }) {
   const asset = resolveAsset(assetCode, assetIssuer);
 
@@ -159,7 +167,7 @@ export async function findMatchingPayment({
 
     return {
       id: payment.id,
-      transaction_hash: payment.transaction_hash
+      transaction_hash: payment.transaction_hash,
     };
   }
 
@@ -169,6 +177,6 @@ export async function findMatchingPayment({
 export function getStellarConfig() {
   return {
     network: NETWORK,
-    horizonUrl: HORIZON_URL
+    horizonUrl: HORIZON_URL,
   };
 }

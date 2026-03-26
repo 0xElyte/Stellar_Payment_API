@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
 import toast from "react-hot-toast";
+import {
+  useHydrateMerchantStore,
+  useMerchantApiKey,
+  useMerchantHydrated,
+  useSetMerchantApiKey,
+} from "@/lib/merchant-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -11,13 +17,39 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8}>
-      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+    >
+      <path
+        d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   ) : (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8}>
-      <path d="M17.94 17.94A10.1 10.1 0 0 1 12 19c-6.4 0-10-7-10-7a18.1 18.1 0 0 1 5.06-5.94M9.9 4.24A9.1 9.1 0 0 1 12 4c6.4 0 10 7 10 7a18.1 18.1 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+    >
+      <path
+        d="M17.94 17.94A10.1 10.1 0 0 1 12 19c-6.4 0-10-7-10-7a18.1 18.1 0 0 1 5.06-5.94M9.9 4.24A9.1 9.1 0 0 1 12 4c6.4 0 10 7 10 7a18.1 18.1 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <line x1="1" y1="1" x2="23" y2="23" strokeLinecap="round" />
     </svg>
   );
@@ -33,20 +65,18 @@ function mask(key: string) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const apiKey = useMerchantApiKey();
+  const hydrated = useMerchantHydrated();
+  const setApiKey = useSetMerchantApiKey();
+
   const [revealed, setRevealed] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
 
   // Rotation flow state
   const [confirming, setConfirming] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
 
-  // Load from localStorage after hydration to avoid SSR mismatch
-  useEffect(() => {
-    setApiKey(localStorage.getItem("merchant_api_key"));
-    setHydrated(true);
-  }, []);
+  useHydrateMerchantStore();
 
   const startRotate = () => {
     setRotateError(null);
@@ -72,11 +102,12 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed to rotate key");
 
       const newKey: string = data.api_key;
-      localStorage.setItem("merchant_api_key", newKey);
       setApiKey(newKey);
       setRevealed(true); // show the new key immediately
       setConfirming(false);
-      toast.success("API key rotated — update any integrations using the old key.");
+      toast.success(
+        "API key rotated — update any integrations using the old key.",
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to rotate key";
       setRotateError(msg);
@@ -94,12 +125,16 @@ export default function SettingsPage() {
     return (
       <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-8 px-6 py-16">
         <header className="flex flex-col gap-3 text-center">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-mint">Settings</p>
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-mint">
+            Settings
+          </p>
           <h1 className="text-3xl font-bold text-white">Merchant Settings</h1>
         </header>
 
         <div className="flex flex-col items-center gap-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-8 text-center">
-          <p className="text-base font-medium text-yellow-200">No API key found</p>
+          <p className="text-base font-medium text-yellow-200">
+            No API key found
+          </p>
           <p className="text-sm text-slate-400">
             Register a merchant account first to manage your credentials here.
           </p>
@@ -120,17 +155,19 @@ export default function SettingsPage() {
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-10 px-6 py-16">
       {/* ── Header ── */}
       <header className="flex flex-col gap-3 text-center">
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-mint">Settings</p>
+        <p className="font-mono text-xs uppercase tracking-[0.3em] text-mint">
+          Settings
+        </p>
         <h1 className="text-3xl font-bold text-white">Merchant Settings</h1>
         <p className="text-sm text-slate-400">
-          Manage your API credentials. Keep your key secret — treat it like a password.
+          Manage your API credentials. Keep your key secret — treat it like a
+          password.
         </p>
       </header>
 
       {/* ── Main card ── */}
       <div className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur">
         <div className="flex flex-col gap-8">
-
           {/* API Key section */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
@@ -161,7 +198,8 @@ export default function SettingsPage() {
             </div>
 
             <p className="text-[11px] text-slate-600">
-              Pass this as the <code className="text-slate-500">x-api-key</code> header on every API request.
+              Pass this as the <code className="text-slate-500">x-api-key</code>{" "}
+              header on every API request.
             </p>
           </section>
 
@@ -203,8 +241,8 @@ export default function SettingsPage() {
                   Are you sure? This cannot be undone.
                 </p>
                 <p className="text-xs text-slate-400">
-                  The old key will stop working immediately. Make sure to update all your
-                  integrations with the new key.
+                  The old key will stop working immediately. Make sure to update
+                  all your integrations with the new key.
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -215,9 +253,24 @@ export default function SettingsPage() {
                   >
                     {rotating ? (
                       <span className="flex items-center gap-2">
-                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        <svg
+                          className="h-4 w-4 animate-spin"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                            fill="none"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
                         </svg>
                         Rotating…
                       </span>
@@ -242,8 +295,15 @@ export default function SettingsPage() {
 
       {/* Footer nav */}
       <footer className="flex justify-center gap-6 text-xs text-slate-500">
-        <Link href="/" className="hover:text-slate-300 transition-colors">Dashboard</Link>
-        <Link href="/dashboard/create" className="hover:text-slate-300 transition-colors">Create Payment</Link>
+        <Link href="/" className="hover:text-slate-300 transition-colors">
+          Dashboard
+        </Link>
+        <Link
+          href="/dashboard/create"
+          className="hover:text-slate-300 transition-colors"
+        >
+          Create Payment
+        </Link>
       </footer>
     </main>
   );
