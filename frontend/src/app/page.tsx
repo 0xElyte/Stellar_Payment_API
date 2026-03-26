@@ -1,3 +1,5 @@
+import RecentPayments from "@/components/RecentPayments";
+
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-10 px-6 py-16">
@@ -36,6 +38,16 @@ export default function Home() {
             <p className="mt-1 text-slate-400">Send the link to customers so they can pay instantly.</p>
           </div>
         </div>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold text-white">Recent Payments</h2>
+          <p className="text-sm text-slate-300">
+            An overview of your latest payment activity.
+          </p>
+        </div>
+        <RecentPayments />
       </section>
     </main>
   );
