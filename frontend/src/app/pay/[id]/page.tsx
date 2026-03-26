@@ -244,9 +244,9 @@ export default function PaymentPage() {
       <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 px-6 py-16">
         <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-8 text-center">
           <p className="text-sm font-medium uppercase tracking-wider text-red-400">Error</p>
-          <p className="mt-3 text-lg font-semibold text-white">
+          <h1 className="mt-3 text-lg font-semibold text-white">
             {fetchError ?? "Payment not found"}
-          </p>
+          </h1>
           <p className="mt-2 text-sm text-slate-400">
             Check the payment link and try again, or contact the sender.
           </p>
