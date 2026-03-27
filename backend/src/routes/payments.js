@@ -301,6 +301,7 @@ function createPaymentsRouter({
 
         const { data, error } = await query
           .eq("id", req.params.id)
+          .is("deleted_at", null)
           .maybeSingle();
 
         if (error) {
@@ -378,6 +379,7 @@ function createPaymentsRouter({
 
         const { data, error } = await query
           .eq("id", req.params.id)
+          .is("deleted_at", null)
           .maybeSingle();
 
         if (error) {
@@ -412,7 +414,11 @@ function createPaymentsRouter({
 
         const { error: updateError } = await supabase
           .from("payments")
-          .update({ status: "confirmed", tx_id: match.transaction_hash })
+          .update({ 
+            status: "confirmed", 
+            tx_id: match.transaction_hash,
+            completion_duration_seconds: Math.floor(latencySeconds)
+          })
           .eq("id", data.id);
 
         if (updateError) {
@@ -1042,6 +1048,90 @@ const webhookResult = await sendWebhook(
       }
     }
   );
+
+  /**
+   * @swagger
+   * /api/payments/{id}:
+   *   delete:
+   *     summary: Soft delete a payment (preserves audit logs)
+   *     tags: [Payments]
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: Payment ID
+   *     responses:
+   *       200:
+   *         description: Payment soft deleted
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                 payment_id:
+   *                   type: string
+   *                 deleted_at:
+   *                   type: string
+   *       404:
+   *         description: Payment not found
+   *       410:
+   *         description: Payment already deleted
+   */
+  router.delete("/payments/:id", validateUuidParam(), async (req, res, next) => {
+    try {
+      // First check if payment exists and is not already deleted
+      const { data: existing, error: fetchError } = await supabase
+        .from("payments")
+        .select("id, deleted_at, merchant_id")
+        .eq("id", req.params.id)
+        .maybeSingle();
+
+      if (fetchError) {
+        fetchError.status = 500;
+        throw fetchError;
+      }
+
+      if (!existing) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      // Verify merchant owns this payment
+      if (req.merchant?.id && existing.merchant_id !== req.merchant.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (existing.deleted_at) {
+        return res.status(410).json({ 
+          error: "Payment already deleted",
+          deleted_at: existing.deleted_at
+        });
+      }
+
+      // Soft delete by setting deleted_at timestamp
+      const now = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from("payments")
+        .update({ deleted_at: now })
+        .eq("id", req.params.id);
+
+      if (updateError) {
+        updateError.status = 500;
+        throw updateError;
+      }
+
+      res.json({
+        message: "Payment soft deleted successfully",
+        payment_id: req.params.id,
+        deleted_at: now
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   return router;
 }
