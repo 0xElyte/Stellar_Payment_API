@@ -42,6 +42,8 @@ interface MetricsResponse {
   data: MetricData[];
   total_volume: number;
   total_payments: number;
+  confirmed_count: number;
+  success_rate: number;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -174,7 +176,7 @@ export default function PaymentMetrics() {
     <div className="flex flex-col gap-6">
       {/* Summary cards */}
       {summary && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
             <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
               7-Day Volume
@@ -198,6 +200,32 @@ export default function PaymentMetrics() {
               <p className="text-sm text-slate-400">
                 {summary.total_payments === 1 ? "payment" : "payments"}
               </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+            <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
+              Confirmed
+            </p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <p className="text-3xl font-bold text-green-400">
+                {summary.confirmed_count}
+              </p>
+              <p className="text-sm text-slate-400">
+                {summary.confirmed_count === 1 ? "intent" : "intents"}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+            <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
+              Success Rate
+            </p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <p className="text-3xl font-bold text-green-400">
+                {summary.success_rate}
+              </p>
+              <p className="text-sm text-slate-400">%</p>
             </div>
           </div>
         </div>

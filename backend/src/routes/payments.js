@@ -588,10 +588,18 @@ function createPaymentsRouter({
         }
       }
 
+      const confirmedCount = payments.filter((p) => p.status === "confirmed").length;
+      const successRate =
+        payments.length > 0
+          ? Number(((confirmedCount / payments.length) * 100).toFixed(1))
+          : 0;
+
       res.json({
         data,
         total_volume: Number(totalVolume.toFixed(2)),
         total_payments: payments.length,
+        confirmed_count: confirmedCount,
+        success_rate: successRate,
       });
     } catch (err) {
       next(err);
