@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { useParams } from "next/navigation";
-import { isFreighterAvailable, getFreighterPublicKey } from "@/lib/freighter";
+import { useWallet } from "@/lib/wallet-context";
 import { usePayment } from "@/lib/usePayment";
 import CopyButton from "@/components/CopyButton";
+import WalletSelector from "@/components/WalletSelector";
 import toast from "react-hot-toast";
 import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
@@ -186,13 +187,11 @@ export default function PaymentPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [freighterReady, setFreighterReady] = useState(false);
   const [showRawIntent, setShowRawIntent] = useState(false);
 
-  const { isProcessing, status: txStatus, error: paymentError, processPayment, processPathPayment } = usePayment();
-
-  // ── Path payment state ─────────────────────────────────────────────────────
-  interface PathQuote {
+  // Path payment state
+  const [usePathPayment, setUsePathPayment] = useState(false);
+  const [pathQuote, setPathQuote] = useState<{
     source_asset: string;
     source_asset_issuer: string | null;
     source_amount: string;
@@ -200,12 +199,13 @@ export default function PaymentPage() {
     destination_asset: string;
     destination_amount: string;
     path: Array<{ asset_code: string; asset_issuer: string | null }>;
-  }
-
-  const [usePathPayment, setUsePathPayment] = useState(false);
-  const [pathQuote, setPathQuote] = useState<PathQuote | null>(null);
+    slippage: number;
+  } | null>(null);
   const [pathQuoteLoading, setPathQuoteLoading] = useState(false);
-  const [walletAsset, setWalletAsset] = useState<string | null>(null);
+  const [pathQuoteError, setPathQuoteError] = useState<string | null>(null);
+
+  const { activeProvider } = useWallet();
+  const { isProcessing, status: txStatus, error: paymentError, processPayment, processPathPayment } = usePayment(activeProvider);
 
   // ── Fetch payment details ──────────────────────────────────────────────────
   useEffect(() => {
@@ -250,92 +250,38 @@ export default function PaymentPage() {
     return () => clearInterval(id);
   }, [paymentId, payment, loading]);
 
-  // ── Check Freighter ────────────────────────────────────────────────────────
+  // ── Fetch path payment quote when wallet is connected ────────────────────
   useEffect(() => {
-    isFreighterAvailable()
-      .then(setFreighterReady)
-      .catch(() => setFreighterReady(false));
-  }, []);
-
-  // ── Detect wallet asset mismatch & fetch path quote ────────────────────────
-  useEffect(() => {
-    if (!freighterReady || !payment || payment.status !== "pending") return;
+    if (!payment || !activeProvider || payment.status !== "pending") return;
 
     let cancelled = false;
-
-    const checkWalletAndFetchQuote = async () => {
+    (async () => {
+      setPathQuoteLoading(true);
+      setPathQuoteError(null);
       try {
-        const publicKey = await getFreighterPublicKey();
-        const horizonUrl =
-          process.env.NEXT_PUBLIC_HORIZON_URL ||
-          "https://horizon-testnet.stellar.org";
-
-        const res = await fetch(`${horizonUrl}/accounts/${publicKey}`);
-        if (!res.ok) return;
-
-        const account = await res.json();
-        const balances: Array<{
-          asset_type: string;
-          asset_code?: string;
-          asset_issuer?: string;
-          balance: string;
-        }> = account.balances;
-
-        // Check if wallet holds the merchant's requested asset
-        const merchantAsset = payment.asset.toUpperCase();
-        const hasDestAsset = balances.some((b) => {
-          if (merchantAsset === "XLM" || merchantAsset === "NATIVE") {
-            return b.asset_type === "native" && parseFloat(b.balance) > 0;
-          }
-          return (
-            b.asset_code === merchantAsset &&
-            b.asset_issuer === payment.asset_issuer &&
-            parseFloat(b.balance) >= payment.amount
-          );
-        });
-
-        if (hasDestAsset || cancelled) return;
-
-        // Wallet doesn't hold the destination asset — find the customer's primary asset
-        // Prefer XLM as the default alternative send asset
-        const hasXLM = balances.some(
-          (b) => b.asset_type === "native" && parseFloat(b.balance) > 0
-        );
-
-        if (!hasXLM || cancelled) return;
-
-        setWalletAsset("XLM");
-
-        // Fetch path quote from backend
-        setPathQuoteLoading(true);
-        const quoteParams = new URLSearchParams({
+        const pubKey = await activeProvider.getPublicKey();
+        const qs = new URLSearchParams({
           source_asset: "XLM",
-          source_account: publicKey,
+          source_asset_issuer: "",
+          source_account: pubKey,
         });
-
-        const quoteRes = await fetch(
-          `${API_URL}/api/path-payment-quote/${payment.id}?${quoteParams}`
+        const res = await fetch(
+          `${API_URL}/api/path-payment-quote/${paymentId}?${qs}`,
         );
-
-        if (!quoteRes.ok || cancelled) {
-          setPathQuoteLoading(false);
+        if (!res.ok) {
+          setPathQuote(null);
           return;
         }
-
-        const quote: PathQuote = await quoteRes.json();
-        if (!cancelled) {
-          setPathQuote(quote);
-        }
+        const data = await res.json();
+        if (!cancelled) setPathQuote(data);
       } catch {
-        // Non-critical — path payment is optional
+        if (!cancelled) setPathQuoteError("Could not fetch path payment quote.");
       } finally {
         if (!cancelled) setPathQuoteLoading(false);
       }
-    };
-
-    checkWalletAndFetchQuote();
+    })();
     return () => { cancelled = true; };
-  }, [freighterReady, payment]);
+  }, [payment, activeProvider, paymentId]);
 
   // ── Pay handler ───────────────────────────────────────────────────────────
   const handlePay = async () => {
@@ -567,102 +513,64 @@ export default function PaymentPage() {
             {/* ── CTA section ── */}
             {!isSettled && !isFailed && (
               <div className="flex flex-col gap-3 pt-2">
-
-                {/* Path payment suggestion */}
-                {freighterReady && pathQuote && walletAsset && (
-                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-amber-400 text-xs">
-                        ⚡
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-amber-300">
-                          Your wallet doesn&apos;t hold {payment.asset.toUpperCase()}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          Pay ~{parseFloat(pathQuote.send_max).toFixed(4)} {walletAsset} instead (includes 1% slippage buffer)
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setUsePathPayment(!usePathPayment)}
-                          className="mt-2 flex items-center gap-2 text-xs font-semibold transition-colors"
-                          style={{ color: usePathPayment ? "var(--checkout-primary)" : "rgb(148,163,184)" }}
-                        >
-                          <span
-                            className="flex h-4 w-4 items-center justify-center rounded border transition-all"
-                            style={{
-                              borderColor: usePathPayment ? "var(--checkout-primary)" : "rgb(100,116,139)",
-                              backgroundColor: usePathPayment ? "var(--checkout-primary)" : "transparent",
-                            }}
-                          >
-                            {usePathPayment && (
-                              <svg className="h-3 w-3 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </span>
-                          Pay with {walletAsset}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {freighterReady && pathQuoteLoading && (
-                  <div className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-400">
-                    <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Checking payment options…
-                  </div>
-                )}
-
-                {freighterReady ? (
-                  <button
-                    type="button"
-                    onClick={handlePay}
-                    disabled={isProcessing || (usePathPayment && !pathQuote)}
-                    className="group relative flex h-12 w-full items-center justify-center rounded-xl font-bold text-black transition-all disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{
-                      backgroundColor: "var(--checkout-primary)",
-                    }}
-                  >
-                    {isProcessing ? (
-                      <span className="flex items-center gap-2">
-                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Processing…
-                      </span>
-                    ) : (
-                      usePathPayment ? `Pay ~${parseFloat(pathQuote!.send_max).toFixed(4)} ${walletAsset} via Path Payment` : "Pay with Freighter"
+                {activeProvider ? (
+                  <>
+                    {/* Path payment toggle */}
+                    {pathQuote && !pathQuoteLoading && (
+                      <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={usePathPayment}
+                          onChange={(e) => setUsePathPayment(e.target.checked)}
+                          className="h-4 w-4 accent-[var(--checkout-primary)]"
+                        />
+                        <span className="text-sm text-slate-300">
+                          Pay with <span className="font-semibold text-white">{pathQuote.send_max} {pathQuote.source_asset}</span> instead
+                        </span>
+                      </label>
                     )}
-                    <div
-                      className="absolute inset-0 -z-10 opacity-0 blur-xl transition-opacity group-hover:opacity-100"
-                      style={{ backgroundColor: "color-mix(in srgb, var(--checkout-primary) 20%, transparent)" }}
-                    />
-                  </button>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <p className="text-center text-xs text-slate-500">
-                      Freighter wallet not detected in this browser
-                    </p>
-                    <a
-                      href="https://freighter.app/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    className="flex h-12 items-center justify-center rounded-xl border font-semibold transition-all"
-                    style={{
-                      borderColor: "color-mix(in srgb, var(--checkout-primary) 50%, transparent)",
-                      color: "var(--checkout-primary)",
-                      backgroundColor: "color-mix(in srgb, var(--checkout-primary) 10%, transparent)",
-                    }}
+                    {pathQuoteLoading && (
+                      <p className="text-center text-xs text-slate-500">Checking alternative payment paths…</p>
+                    )}
+                    {pathQuoteError && (
+                      <p className="text-center text-xs text-red-400">{pathQuoteError}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePay}
+                      disabled={isProcessing}
+                      className="group relative flex h-12 w-full items-center justify-center rounded-xl font-bold text-black transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{
+                        backgroundColor: "var(--checkout-primary)",
+                      }}
                     >
-                      Install Freighter Extension
-                    </a>
-                  </div>
+                      {isProcessing ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Processing…
+                        </span>
+                      ) : usePathPayment && pathQuote ? (
+                        `Pay ${pathQuote.send_max} ${pathQuote.source_asset}`
+                      ) : (
+                        `Pay ${payment.amount} ${payment.asset.toUpperCase()}`
+                      )}
+                      <div
+                        className="absolute inset-0 -z-10 opacity-0 blur-xl transition-opacity group-hover:opacity-100"
+                        style={{ backgroundColor: "color-mix(in srgb, var(--checkout-primary) 20%, transparent)" }}
+                      />
+                    </button>
+                  </>
+                ) : (
+                  <WalletSelector
+                    networkPassphrase={
+                      process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
+                      "Test SDF Network ; September 2015"
+                    }
+                    onConnected={() => {}}
+                  />
                 )}
               </div>
             )}

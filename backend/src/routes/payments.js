@@ -147,6 +147,17 @@ function createPaymentsRouter({
         }
       }
 
+      // Allowed-issuers check: if the merchant has configured a non-empty
+      // allowlist, only those issuer addresses may be used.
+      const allowedIssuers = req.merchant.allowed_issuers;
+      if (Array.isArray(allowedIssuers) && allowedIssuers.length > 0) {
+        if (!body.asset_issuer || !allowedIssuers.includes(body.asset_issuer)) {
+          return res.status(400).json({
+            error: "asset_issuer is not in the merchant's list of allowed issuers",
+          });
+        }
+      }
+
       const paymentId = randomUUID();
       const now = new Date().toISOString();
       const paymentLinkBase =
@@ -289,7 +300,7 @@ function createPaymentsRouter({
    *             schema:
    *               type: object
    *               properties:
-   *                 status:
+ *                 status:
    *                   type: string
    *                   enum: [pending, confirmed]
    *                 tx_id:
@@ -308,7 +319,7 @@ function createPaymentsRouter({
         const { data, error } = await supabase
           .from("payments")
           .select(
-            "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret)",
+            "id, merchant_id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret)",
           )
           .eq("id", req.params.id)
           .maybeSingle();
@@ -351,6 +362,20 @@ function createPaymentsRouter({
         if (updateError) {
           updateError.status = 500;
           throw updateError;
+        }
+
+        // Emit real-time event to the merchant's private room (issue #229)
+        const io = req.app.locals.io;
+        if (io && data.merchant_id) {
+          io.to(`merchant:${data.merchant_id}`).emit("payment:confirmed", {
+            id: data.id,
+            amount: data.amount,
+            asset: data.asset,
+            asset_issuer: data.asset_issuer,
+            recipient: data.recipient,
+            tx_id: match.transaction_hash,
+            confirmed_at: new Date().toISOString(),
+          });
         }
 
         const merchantSecret = data.merchants?.webhook_secret;
@@ -639,14 +664,12 @@ function createPaymentsRouter({
           });
         }
 
-        // Check if already refunded
         if (payment.metadata?.refund_status === "refunded") {
           return res.status(400).json({
             error: "Payment already refunded",
           });
         }
 
-        // Get original transaction to find the sender
         const StellarSdk = await import("stellar-sdk");
         const HORIZON_URL =
           process.env.STELLAR_HORIZON_URL ||
@@ -662,7 +685,6 @@ function createPaymentsRouter({
 
         const refundDestination = tx.source_account;
 
-        // Create refund transaction
         const refundTx = await createRefundTransaction({
           sourceAccount: payment.recipient,
           destination: refundDestination,
@@ -672,7 +694,6 @@ function createPaymentsRouter({
           memo: `Refund: ${payment.id.substring(0, 8)}`,
         });
 
-        // Mark as refund pending
         await supabase
           .from("payments")
           .update({
@@ -758,7 +779,6 @@ function createPaymentsRouter({
           return res.status(404).json({ error: "Payment not found" });
         }
 
-        // Update payment with refund confirmation
         await supabase
           .from("payments")
           .update({
