@@ -12,10 +12,7 @@ import {
   webhookSettingsSchema,
   testWebhookSchema,
 } from "../lib/request-schemas.js";
-import { resolveBrandingConfig } from "../lib/branding.js";
-import { resolveMerchantSettings } from "../lib/merchant-settings.js";
-import { sendWebhook } from "../lib/webhooks.js";
-import { getPayloadForVersion } from "../webhooks/resolver.js";
+import { z } from "zod";
 
 const defaultMerchantRegistrationRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -605,22 +602,8 @@ router.post("/merchants/generate-api-key", requireSessionAuth(), async (req, res
 
 router.get("/merchant-branding", async (req, res, next) => {
   try {
-    const { data, error } = await supabase
-      .from("merchants")
-      .select("branding_config")
-      .eq("id", req.merchant.id)
-      .maybeSingle();
-
-    if (error) {
-      error.status = 500;
-      throw error;
-    }
-
-    res.json({
-      branding_config: resolveBrandingConfig({
-        merchantBranding: data?.branding_config || null,
-      }),
-    });
+    const result = await merchantService.getMerchantBranding(req.merchant.id);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -648,33 +631,11 @@ router.put("/merchant-branding", validateRequest({ body: sessionBrandingSchema }
     next(err);
   }
 });
-// ─── Webhook Settings ────────────────────────────────────────────────────────
 
 router.get("/merchant-profile", async (req, res, next) => {
   try {
-    const { data, error } = await supabase
-      .from("merchants")
-      .select(
-        "id, email, business_name, notification_email, merchant_settings, created_at",
-      )
-      .eq("id", req.merchant.id)
-      .maybeSingle();
-
-    if (error) {
-      error.status = 500;
-      throw error;
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: "Merchant profile not found" });
-    }
-
-    res.json({
-      merchant: {
-        ...data,
-        merchant_settings: resolveMerchantSettings(data.merchant_settings),
-      },
-    });
+    const result = await merchantService.getMerchantProfile(req.merchant.id);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -761,15 +722,6 @@ router.post("/test-webhook", validateRequest({ body: testWebhookSchema }), async
   }
 });
 
-const paymentLimitsSchema = z
-  .record(
-    z.string().min(1),
-    z.object({
-      min: z.number().positive().optional(),
-      max: z.number().positive().optional(),
-    })
-  )
-  .optional();
 /**
  * @swagger
  * /api/webhook-settings:
@@ -778,34 +730,11 @@ const paymentLimitsSchema = z
  *     tags: [Merchants]
  *     security:
  *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: Current webhook settings
  */
 router.get("/webhook-settings", async (req, res, next) => {
   try {
-    const { data, error } = await supabase
-      .from("merchants")
-      .select("webhook_url, webhook_secret")
-      .eq("id", req.merchant.id)
-      .single();
-
-    if (error) {
-      error.status = 500;
-      throw error;
-    }
-
-    // Mask the secret: show first 10 chars, hide the rest
-    const secret = data.webhook_secret || "";
-    const maskedSecret =
-      secret.length > 10
-        ? secret.slice(0, 10) + "•".repeat(secret.length - 10)
-        : "•".repeat(secret.length);
-
-    res.json({
-      webhook_url: data.webhook_url || "",
-      webhook_secret_masked: maskedSecret,
-    });
+    const result = await merchantService.getWebhookSettings(req.merchant.id);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -819,21 +748,6 @@ router.get("/webhook-settings", async (req, res, next) => {
  *     tags: [Merchants]
  *     security:
  *       - ApiKeyAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               webhook_url:
- *                 type: string
- *                 format: uri
- *     responses:
- *       200:
- *         description: Webhook URL updated
- *       400:
- *         description: Validation error
  */
 router.put("/webhook-settings", validateRequest({ body: webhookSettingsSchema }), async (req, res, next) => {
   try {
@@ -865,11 +779,6 @@ router.put("/webhook-settings", validateRequest({ body: webhookSettingsSchema })
  *     tags: [Merchants]
  *     security:
  *       - ApiKeyAuth: []
- *     responses:
- *       200:
- *         description: New webhook secret issued
- *       401:
- *         description: Missing or invalid x-api-key header
  */
 router.post("/regenerate-webhook-secret", async (req, res, next) => {
   try {

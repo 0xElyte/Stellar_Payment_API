@@ -9,6 +9,7 @@ const nextConfig = {
   reactStrictMode: true,
   compress: true,
   poweredByHeader: false,
+  allowedDevOrigins: ["127.0.0.1"],
   images: {
     remotePatterns: [
       {

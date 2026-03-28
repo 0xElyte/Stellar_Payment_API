@@ -1,13 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import rateLimit from "express-rate-limit";
-import { randomUUID } from "node:crypto";
-import {
-  findMatchingPayment,
-  findStrictReceivePaths,
-  createRefundTransaction,
-} from "../lib/stellar.js";
-import { supabase } from "../lib/supabase.js";
+import { paymentService } from "../services/paymentService.js";
 import { validateUuidParam } from "../lib/validate-uuid.js";
 import {
   paymentSessionZodSchema,
@@ -44,35 +38,6 @@ const defaultVerifyPaymentRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-
-function applyPaymentFilters(query, req) {
-  const { status, asset, date_from: dateFrom, date_to: dateTo, search } = req.query;
-
-  if (typeof status === "string" && status.length > 0) {
-    query = query.eq("status", status);
-  }
-
-  if (typeof asset === "string" && asset.length > 0) {
-    query = query.eq("asset", asset);
-  }
-
-  if (typeof dateFrom === "string" && dateFrom.length > 0) {
-    query = query.gte("created_at", `${dateFrom}T00:00:00.000Z`);
-  }
-
-  if (typeof dateTo === "string" && dateTo.length > 0) {
-    query = query.lte("created_at", `${dateTo}T23:59:59.999Z`);
-  }
-
-  if (typeof search === "string" && search.trim().length > 0) {
-    const term = search.trim().replaceAll(",", "\\,");
-    query = query.or(
-      `id.ilike.%${term}%,description.ilike.%${term}%,recipient.ilike.%${term}%`,
-    );
-  }
-
-  return query;
-}
 
 function createPaymentsRouter({
   verifyPaymentRateLimit = defaultVerifyPaymentRateLimit,
@@ -259,6 +224,9 @@ function createPaymentsRouter({
         branding_config: resolvedBrandingConfig,
       });
     } catch (err) {
+      if (err.status === 400 && err.details) {
+        return res.status(400).json({ error: err.message, ...err.details });
+      }
       next(err);
     }
   }
@@ -354,30 +322,6 @@ function createPaymentsRouter({
    *   post:
    *     summary: Verify a payment on the Stellar network
    *     tags: [Payments]
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: Payment ID
-   *     responses:
-   *       200:
-   *         description: Verification result
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 status:
-   *                   type: string
-   *                   enum: [pending, confirmed]
-   *                 tx_id:
-   *                   type: string
-   *                 webhook:
-   *                   type: object
-   *       404:
-   *         description: Payment not found
    */
   router.post(
     "/verify-payment/:id",
@@ -673,64 +617,8 @@ function createPaymentsRouter({
    */
   router.get("/metrics/7day", async (req, res, next) => {
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      const { data: payments, error } = await supabase
-        .from("payments")
-        .select("amount, created_at, status")
-        .eq("merchant_id", req.merchant.id)
-        .gte("created_at", sevenDaysAgo.toISOString())
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        error.status = 500;
-        throw error;
-      }
-
-      const metricsMap = new Map();
-      let totalVolume = 0;
-
-      payments.forEach((payment) => {
-        const date = new Date(payment.created_at).toISOString().split("T")[0];
-        const volume = Number(payment.amount) || 0;
-
-        if (!metricsMap.has(date)) {
-          metricsMap.set(date, { date, volume: 0, count: 0 });
-        }
-
-        const dayMetric = metricsMap.get(date);
-        dayMetric.volume += volume;
-        dayMetric.count += 1;
-        totalVolume += volume;
-      });
-
-      const data = [];
-      for (let i = 6; i >= 0; i -= 1) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split("T")[0];
-
-        if (metricsMap.has(dateStr)) {
-          data.push(metricsMap.get(dateStr));
-        } else {
-          data.push({ date: dateStr, volume: 0, count: 0 });
-        }
-      }
-
-      const confirmedCount = payments.filter((p) => p.status === "confirmed").length;
-      const successRate =
-        payments.length > 0
-          ? Number(((confirmedCount / payments.length) * 100).toFixed(1))
-          : 0;
-
-      res.json({
-        data,
-        total_volume: Number(totalVolume.toFixed(2)),
-        total_payments: payments.length,
-        confirmed_count: confirmedCount,
-        success_rate: successRate,
-      });
+      const result = await paymentService.getRollingMetrics(req.merchant.id);
+      res.json(result);
     } catch (err) {
       next(err);
     }
@@ -777,80 +665,8 @@ function createPaymentsRouter({
     validateUuidParam(),
     async (req, res, next) => {
       try {
-        const { data: payment, error } = await supabase
-          .from("payments")
-          .select(
-            "id, merchant_id, amount, asset, asset_issuer, recipient, status, tx_id, metadata"
-          )
-          .eq("id", req.params.id)
-          .eq("merchant_id", req.merchant.id)
-          .maybeSingle();
-
-        if (error) {
-          error.status = 500;
-          throw error;
-        }
-
-        if (!payment) {
-          return res.status(404).json({ error: "Payment not found" });
-        }
-
-        if (payment.status !== "confirmed") {
-          return res.status(400).json({
-            error: "Only confirmed payments can be refunded",
-          });
-        }
-
-        if (payment.metadata?.refund_status === "refunded") {
-          return res.status(400).json({
-            error: "Payment already refunded",
-          });
-        }
-
-        const StellarSdk = await import("stellar-sdk");
-        const HORIZON_URL =
-          process.env.STELLAR_HORIZON_URL ||
-          (process.env.STELLAR_NETWORK === "public"
-            ? "https://horizon.stellar.org"
-            : "https://horizon-testnet.stellar.org");
-
-        const server = new StellarSdk.Horizon.Server(HORIZON_URL);
-        const tx = await server
-          .transactions()
-          .transaction(payment.tx_id)
-          .call();
-
-        const refundDestination = tx.source_account;
-
-        const refundTx = await createRefundTransaction({
-          sourceAccount: payment.recipient,
-          destination: refundDestination,
-          amount: payment.amount,
-          assetCode: payment.asset,
-          assetIssuer: payment.asset_issuer,
-          memo: `Refund: ${payment.id.substring(0, 8)}`,
-        });
-
-        await supabase
-          .from("payments")
-          .update({
-            metadata: {
-              ...payment.metadata,
-              refund_status: "pending",
-              refund_xdr: refundTx.xdr,
-              refund_created_at: new Date().toISOString(),
-            },
-          })
-          .eq("id", payment.id);
-
-        res.json({
-          xdr: refundTx.xdr,
-          hash: refundTx.hash,
-          refund_amount: payment.amount,
-          refund_destination: refundDestination,
-          instructions:
-            "Sign this transaction with your merchant wallet and submit to Stellar network. Then call POST /api/payments/:id/refund/confirm with the transaction hash.",
-        });
+        const result = await paymentService.generateRefundTx(req.params.id, req.merchant.id);
+        res.json(result);
       } catch (err) {
         next(err);
       }
@@ -997,37 +813,6 @@ function createPaymentsRouter({
    *         description: Anchor request failed
    */
    *     tags: [Payments]
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: Payment ID
-   *       - in: query
-   *         name: source_asset
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: Asset code the customer wants to send (e.g. XLM)
-   *       - in: query
-   *         name: source_asset_issuer
-   *         schema:
-   *           type: string
-   *         description: Issuer of the source asset (required if not XLM)
-   *       - in: query
-   *         name: source_account
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: Customer's Stellar public key
-   *     responses:
-   *       200:
-   *         description: Path payment quote
-   *       400:
-   *         description: Missing parameters or same asset
-   *       404:
-   *         description: Payment not found or no path available
    */
   router.get(
     "/path-payment-quote/:id",
@@ -1305,4 +1090,3 @@ function createPaymentsRouter({
 }
 
 export default createPaymentsRouter;
-

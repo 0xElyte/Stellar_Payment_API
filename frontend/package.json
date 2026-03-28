@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "test:visual": "playwright test tests/e2e/critical-pages-vrt.spec.ts",
-    "test:visual:update": "playwright test tests/e2e/critical-pages-vrt.spec.ts --update-snapshots"
+    "test:visual": "playwright test tests/e2e/vrt.spec.ts --project=chromium",
+    "test:visual:update": "playwright test tests/e2e/vrt.spec.ts --project=chromium --update-snapshots"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -18,8 +18,10 @@
     "@walletconnect/sign-client": "^2.23.8",
     "@walletconnect/types": "^2.23.8",
     "boring-avatars": "^2.0.4",
+    "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.38.0",
     "marked": "^17.0.5",
+    "motion": "^12.38.0",
     "next": "^14.2.5",
     "next-intl": "^4.8.3",
     "next-themes": "^0.4.6",
@@ -36,6 +38,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "25.5.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.7",

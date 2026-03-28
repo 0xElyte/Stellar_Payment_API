@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useWallet } from "@/lib/wallet-context";
 import { usePayment } from "@/lib/usePayment";
+import { useAssetMetadata } from "@/lib/useAssetMetadata";
 import CopyButton from "@/components/CopyButton";
 import WalletSelector from "@/components/WalletSelector";
 import toast from "react-hot-toast";
@@ -176,8 +177,29 @@ function MerchantHeader({ branding, paymentId, t }: MerchantHeaderProps) {
 
 // ─── Asset badge ────────────────────────────────────────────────────────────
 
-function AssetBadge({ asset }: { asset: string }) {
+function AssetBadge({
+  asset,
+  logo,
+  name,
+}: {
+  asset: string;
+  logo?: string | null;
+  name?: string | null;
+}) {
   const a = asset.toUpperCase();
+
+  if (logo) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logo} alt={name ?? asset} className="h-8 w-8 object-contain" />
+      </span>
+    );
+  }
+
   if (a === "XLM" || a === "NATIVE") {
     return (
       <span
@@ -353,12 +375,14 @@ export default function PaymentPage() {
 
   const { activeProvider } = useWallet();
   const {
-    isProcessing,
-    status: txStatus,
-    error: paymentError,
-    processPayment,
-    processPathPayment,
-  } = usePayment(activeProvider);
+   isProcessing,
+   status: txStatus,
+   error: paymentError,
+   processPayment,
+   processPathPayment,
+ } = usePayment(activeProvider);
+
+const { assets: assetMetadata } = useAssetMetadata();
 
   // ── Fetch payment details ──────────────────────────────────────────────────
   useEffect(() => {
@@ -550,7 +574,11 @@ export default function PaymentPage() {
         <div className="rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur">
           {/* Amount hero */}
           <div className="flex flex-col items-center gap-3 border-b border-white/10 px-8 py-10">
-            <AssetBadge asset={payment.asset} />
+            <AssetBadge
+              asset={payment.asset}
+              logo={assetMetadata.find((a) => a.code === payment.asset.toUpperCase())?.logo}
+              name={assetMetadata.find((a) => a.code === payment.asset.toUpperCase())?.name}
+            />
             <div className="flex items-baseline gap-2">
               <span className="text-5xl font-bold tracking-tight text-white">
                 {payment.amount.toLocaleString(locale, {

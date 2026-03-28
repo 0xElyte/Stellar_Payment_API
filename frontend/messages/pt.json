@@ -94,7 +94,9 @@
     "checkoutPreview": "Previa do checkout",
     "payNow": "Pagar agora",
     "generating": "Gerando...",
-    "generate": "Gerar link de pagamento"
+    "generate": "Gerar link de pagamento",
+    "rateLimitError": "Você está criando links rápido demais. Tente novamente em {seconds} segundos.",
+    "retryWait": "Aguarde {seconds}s…"
   },
   "paymentMetrics": {
     "downloadImage": "Baixar imagem",
