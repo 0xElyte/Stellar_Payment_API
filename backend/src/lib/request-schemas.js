@@ -69,6 +69,7 @@ const paymentBaseSchema = z.object({
     }, "webhook_url must be a valid URL"),
     client_id: optionalTrimmedString(),
     metadata: z.unknown().optional(),
+    sandbox: z.boolean().optional(),
   });
 
 function applyPaymentValidationRules(body, ctx) {

@@ -106,6 +106,32 @@ function applyMetadataFilters(query, rawQuery) {
   return query;
 }
 
+/**
+ * Parse `metadata[key]=value` query params and apply JSONB equality filters.
+ *
+ * Each `metadata[key]` entry is translated to a Supabase `.filter()` call
+ * using the `cs` (contains) operator against a single-key JSON object, which
+ * maps to the Postgres `@>` operator on a JSONB column.
+ *
+ * Only safe key names (alphanumeric + _ + -) are accepted to guard against
+ * SQL injection.
+ */
+const SAFE_METADATA_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function applyMetadataFilters(query, rawQuery) {
+  const metadataParam = rawQuery.metadata;
+  if (!metadataParam || typeof metadataParam !== "object" || Array.isArray(metadataParam)) {
+    return query;
+  }
+  for (const [key, value] of Object.entries(metadataParam)) {
+    if (!SAFE_METADATA_KEY_RE.test(key)) continue;
+    if (typeof value !== "string") continue;
+    // Use JSONB containment: metadata @> '{"key": "value"}'
+    query = query.filter("metadata", "cs", JSON.stringify({ [key]: value }));
+  }
+  return query;
+}
+
 function createPaymentsRouter({
   verifyPaymentRateLimit = defaultVerifyPaymentRateLimit,
 } = {}) {
@@ -242,7 +268,9 @@ function createPaymentsRouter({
         }
       }
 
-      const paymentId = randomUUID();
+      const isSandbox = body.sandbox === true;
+      const baseId = randomUUID();
+      const paymentId = isSandbox ? `test_${baseId}` : baseId;
       const now = new Date().toISOString();
       const paymentLinkBase =
         process.env.PAYMENT_LINK_BASE || "http://localhost:3000";
@@ -273,6 +301,7 @@ function createPaymentsRouter({
         status: "pending",
         tx_id: null,
         metadata,
+        sandbox: isSandbox,
         created_at: now,
       };
 
@@ -285,13 +314,16 @@ function createPaymentsRouter({
         throw insertError;
       }
 
-      // Record metric for payment creation
-      paymentCreatedCounter.inc({ asset: body.asset });
+      // Only record production metrics for non-sandbox payments.
+      if (!isSandbox) {
+        paymentCreatedCounter.inc({ asset: body.asset });
+      }
 
       res.status(201).json({
         payment_id: paymentId,
         payment_link: paymentLink,
         status: "pending",
+        sandbox: isSandbox,
         branding_config: resolvedBrandingConfig,
       });
     } catch (err) {
@@ -690,7 +722,8 @@ function createPaymentsRouter({
       let countQuery = supabase
         .from("payments")
         .select("*", { count: "exact", head: true })
-        .eq("merchant_id", req.merchant.id);
+        .eq("merchant_id", req.merchant.id)
+        .is("deleted_at", null);
       if (clientId) {
         countQuery = countQuery.eq("client_id", clientId);
       }
@@ -710,6 +743,7 @@ function createPaymentsRouter({
           "id, amount, asset, asset_issuer, recipient, description, client_id, status, tx_id, created_at",
         )
         .eq("merchant_id", req.merchant.id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (clientId) {
         dataQuery = dataQuery.eq("client_id", clientId);
