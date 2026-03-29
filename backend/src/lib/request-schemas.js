@@ -273,7 +273,11 @@ export const authChallengeSchema = z.object({
       invalid_type_error: "Account must be a string",
     })
     .trim()
-    .min(1, "destination_address is required"),
+    .min(1, "destination_address is required")
+    .refine(
+      (val) => val.startsWith("G") && val.length === 56,
+      "Invalid Stellar address",
+    ),
   description: paymentBaseSchema.shape.description,
   memo: paymentBaseSchema.shape.memo,
   memo_type: paymentBaseSchema.shape.memo_type,
@@ -283,10 +287,6 @@ export const authChallengeSchema = z.object({
   }, "callback_url must be a valid URL"),
   client_id: paymentBaseSchema.shape.client_id,
   metadata: z.unknown().optional(),
-    .refine(
-      (val) => val.startsWith("G") && val.length === 56,
-      "Invalid Stellar address",
-    ),
 });
 
 export const authVerifySchema = z.object({
