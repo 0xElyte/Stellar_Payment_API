@@ -15,7 +15,6 @@ import {
 } from "@/lib/merchant-store";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 const USDC_ISSUER =
@@ -179,8 +178,7 @@ function SuccessCard({ created, onReset, t }: SuccessCardProps) {
   useEffect(() => {
     fireConfetti();
     setCanShare(
-      typeof navigator !== "undefined" &&
-        typeof navigator.share === "function",
+      typeof navigator !== "undefined" && typeof navigator.share === "function",
     );
   }, []);
 
@@ -284,7 +282,10 @@ function SuccessCard({ created, onReset, t }: SuccessCardProps) {
           </div>
         </motion.div>
 
-        <motion.div variants={childVariants} className="mt-4 flex flex-wrap gap-2">
+        <motion.div
+          variants={childVariants}
+          className="mt-4 flex flex-wrap gap-2"
+        >
           {canShare && (
             <button
               type="button"
@@ -349,6 +350,8 @@ export default function CreatePaymentForm() {
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [amountError, setAmountError] = useState<string | null>(null);
+  const [recipientError, setRecipientError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedPayment | null>(null);
   const apiKey = useMerchantApiKey();
   const hydrated = useMerchantHydrated();
@@ -413,15 +416,20 @@ export default function CreatePaymentForm() {
     e.preventDefault();
     setError(null);
 
+    // Client-side validation
+    let hasError = false;
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      setError(t("invalidAmount"));
-      return;
+      setAmountError("Amount must be greater than 0.");
+      hasError = true;
     }
     if (!STELLAR_ADDRESS_RE.test(recipient.trim())) {
-      setError(t("invalidRecipient"));
-      return;
+      setRecipientError(
+        "Must be a valid Stellar public key (56 characters, starts with G).",
+      );
+      hasError = true;
     }
+    if (hasError) return;
 
     setLoading(true);
     try {
@@ -483,6 +491,8 @@ export default function CreatePaymentForm() {
     localStorage.removeItem("payment_branding");
     localStorage.removeItem("payment_trusted_address");
     setError(null);
+    setAmountError(null);
+    setRecipientError(null);
     setRetryAfter(0);
   };
 
@@ -496,7 +506,7 @@ export default function CreatePaymentForm() {
 
   const updateBrandingField = (
     key: keyof typeof DEFAULT_BRANDING,
-    value: string
+    value: string,
   ) => {
     setBranding((current) => ({ ...current, [key]: normalizeHexInput(value) }));
   };
@@ -571,10 +581,24 @@ export default function CreatePaymentForm() {
                 step="any"
                 required
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="rounded-xl border border-white/10 bg-white/5 p-3 text-white placeholder:text-slate-600 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  setAmountError(null);
+                }}
+                aria-invalid={!!amountError}
+                aria-describedby={amountError ? "amount-error" : undefined}
+                className={`rounded-xl border bg-white/5 p-3 text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${amountError ? "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/50" : "border-white/10 focus:border-mint/50 focus:ring-mint/50"}`}
                 placeholder={amountPlaceholder}
               />
+              {amountError && (
+                <p
+                  id="amount-error"
+                  role="alert"
+                  className="text-xs text-red-400"
+                >
+                  {amountError}
+                </p>
+              )}
             </div>
 
             {/* Asset */}
@@ -593,10 +617,11 @@ export default function CreatePaymentForm() {
                     type="button"
                     onClick={() => setAsset(a)}
                     aria-pressed={asset === a}
-                    className={`flex-1 rounded-xl border py-2.5 text-sm font-medium transition-all ${asset === a
-                      ? "border-mint/50 bg-mint/10 text-mint"
-                      : "border-white/10 bg-white/5 text-slate-400 hover:border-white/20 hover:text-white"
-                      }`}
+                    className={`flex-1 rounded-xl border py-2.5 text-sm font-medium transition-all ${
+                      asset === a
+                        ? "border-mint/50 bg-mint/10 text-mint"
+                        : "border-white/10 bg-white/5 text-slate-400 hover:border-white/20 hover:text-white"
+                    }`}
                   >
                     {a}
                   </button>
@@ -651,12 +676,28 @@ export default function CreatePaymentForm() {
                 type="text"
                 required
                 value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                className="rounded-xl border border-white/10 bg-white/5 p-3 font-mono text-sm text-white placeholder:font-sans placeholder:text-slate-600 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/50"
+                onChange={(e) => {
+                  setRecipient(e.target.value);
+                  setRecipientError(null);
+                }}
+                aria-invalid={!!recipientError}
+                aria-describedby={
+                  recipientError ? "recipient-error" : undefined
+                }
+                className={`rounded-xl border bg-white/5 p-3 font-mono text-sm text-white placeholder:font-sans placeholder:text-slate-600 focus:outline-none focus:ring-1 ${recipientError ? "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/50" : "border-white/10 focus:border-mint/50 focus:ring-mint/50"}`}
                 placeholder={recipientPlaceholder}
                 autoComplete="off"
                 spellCheck={false}
               />
+              {recipientError && (
+                <p
+                  id="recipient-error"
+                  role="alert"
+                  className="text-xs text-red-400"
+                >
+                  {recipientError}
+                </p>
+              )}
             </div>
 
             {/* Description */}
@@ -694,10 +735,11 @@ export default function CreatePaymentForm() {
                 <button
                   type="button"
                   onClick={() => setUseSessionBranding((v) => !v)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${useSessionBranding
-                    ? "bg-mint text-black"
-                    : "border border-white/20 text-slate-300"
-                    }`}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    useSessionBranding
+                      ? "bg-mint text-black"
+                      : "border border-white/20 text-slate-300"
+                  }`}
                 >
                   {useSessionBranding ? t("enabled") : t("disabled")}
                 </button>
