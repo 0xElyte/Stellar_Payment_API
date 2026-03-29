@@ -11,8 +11,9 @@ import {
   useHydrateMerchantStore,
   useMerchantApiKey,
 } from "@/lib/merchant-store";
-import { useTranslations } from "next-intl";
+const { useTranslations } = require("next-intl");
 import FirstApiKeyModal from "@/components/FirstApiKeyModal";
+import Timeline from "@/components/Timeline";
 import FirstPaymentCelebration from "@/components/FirstPaymentCelebration";
 
 export default function DashboardPage() {
@@ -44,7 +45,32 @@ export default function DashboardPage() {
       return () => clearTimeout(timer);
     }
   }, [hydrated, loading, apiKey]);
-
+  const logs = [
+  {
+    id: "1",
+    action: "Payment link created",
+    field_changed: "status",
+    old_value: "draft",
+    new_value: "active",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "2",
+    action: "Webhook endpoint updated",
+    field_changed: "url",
+    old_value: "https://old-endpoint.com",
+    new_value: "https://new-endpoint.com",
+    created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+  },
+  {
+    id: "3",
+    action: "Merchant settings changed",
+    field_changed: "currency",
+    old_value: "USD",
+    new_value: "USDC",
+    created_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+  },
+];
   if (!hydrated || loading) {
     return <DashboardSkeleton />;
   }
@@ -66,6 +92,14 @@ export default function DashboardPage() {
 
           <section className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-white">
+                Recent Activity
+              </h2>
+              <Link
+                href="/payments"
+                className="text-sm text-mint hover:text-glow"
+              >
+                {t("viewAllPayments")} →
               <h2 className="text-xl font-semibold text-white">Live Confirmations</h2>
               <Link href="/payments" className="text-sm text-mint hover:text-glow">
                 View all payments →
