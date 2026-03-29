@@ -347,4 +347,82 @@ export const merchantService = {
 
     return { webhook_secret: newSecret };
   },
+
+  async getWebhookLogs(merchantId, { limit = 20, cursor = null, status = null } = {}) {
+    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+    let query = supabase
+      .from("webhook_delivery_logs")
+      .select(`
+        id,
+        payment_id,
+        status_code,
+        response_body,
+        timestamp,
+        payments!inner(merchant_id, amount, asset, status)
+      `)
+      .eq("payments.merchant_id", merchantId);
+
+    if (status === "success") {
+      query = query.gte("status_code", 200).lt("status_code", 300);
+    } else if (status === "failure") {
+      query = query.or("status_code.lt.200,status_code.gte.300");
+    }
+
+    if (cursor) {
+      try {
+        const decoded = Buffer.from(cursor, "base64").toString("utf-8");
+        const { timestamp, id } = JSON.parse(decoded);
+        query = query.or(`timestamp.lt.${timestamp},and(timestamp.eq.${timestamp},id.lt.${id})`);
+      } catch (e) {
+        const err = new Error("Invalid pagination cursor");
+        err.status = 400;
+        throw err;
+      }
+    }
+
+    const { data: logsData, error } = await query
+      .order("timestamp", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(parsedLimit + 1);
+
+    if (error) {
+      error.status = 500;
+      throw error;
+    }
+
+    const hasNextPage = logsData.length > parsedLimit;
+    const items = hasNextPage ? logsData.slice(0, parsedLimit) : logsData;
+
+    let nextCursor = null;
+    if (hasNextPage) {
+      const lastItem = items[items.length - 1];
+      nextCursor = Buffer.from(
+        JSON.stringify({
+          timestamp: lastItem.timestamp,
+          id: lastItem.id,
+        })
+      ).toString("base64");
+    }
+
+    const logs = items.map((log) => ({
+      id: log.id,
+      payment_id: log.payment_id,
+      status_code: log.status_code,
+      success: log.status_code >= 200 && log.status_code < 300,
+      response_body: log.response_body,
+      timestamp: log.timestamp,
+      payment: {
+        amount: log.payments.amount,
+        asset: log.payments.asset,
+        status: log.payments.status,
+      },
+    }));
+
+    return {
+      logs,
+      next_cursor: nextCursor,
+      limit: parsedLimit,
+    };
+  },
 };

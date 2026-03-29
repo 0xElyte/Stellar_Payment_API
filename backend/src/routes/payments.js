@@ -13,12 +13,11 @@ import {
 import { validateRequest } from "../lib/validation.js";
 import { createCreatePaymentRateLimit } from "../lib/create-payment-rate-limit.js";
 import { recaptchaMiddleware } from "../lib/recaptcha.js";
-import { sendWebhook } from "../lib/webhooks.js";
+import { sendWebhook, isEventSubscribed } from "../lib/webhooks.js";
 import { sendReceiptEmail } from "../lib/email.js";
 import { renderReceiptEmail } from "../lib/email-templates.js";
 import { resolveBrandingConfig } from "../lib/branding.js";
-
-import { sendReceiptEmail } from "../lib/email.js";
+import { generatePaginationLinks } from "../lib/pagination-links.js";
 
 import {
   connectRedisClient,
@@ -82,6 +81,56 @@ function applyPaymentFilters(query, req) {
   return query;
 }
 
+/**
+ * Parse `metadata[key]=value` query params and apply JSONB equality filters.
+ *
+ * Each `metadata[key]` entry is translated to a Supabase `.filter()` call
+ * using the `cs` (contains) operator against a single-key JSON object, which
+ * maps to the Postgres `@>` operator on a JSONB column.
+ *
+ * Only safe key names (alphanumeric + _ + -) are accepted to guard against
+ * SQL injection.
+ */
+const SAFE_METADATA_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function applyMetadataFilters(query, rawQuery) {
+  const metadataParam = rawQuery.metadata;
+  if (!metadataParam || typeof metadataParam !== "object" || Array.isArray(metadataParam)) {
+    return query;
+  }
+  for (const [key, value] of Object.entries(metadataParam)) {
+    if (!SAFE_METADATA_KEY_RE.test(key)) continue;
+    if (typeof value !== "string") continue;
+    query = query.filter("metadata", "cs", JSON.stringify({ [key]: value }));
+  }
+  return query;
+}
+
+/**
+ * Parse `metadata[key]=value` query params and apply JSONB equality filters.
+ *
+ * Each `metadata[key]` entry is translated to a Supabase `.filter()` call
+ * using the `cs` (contains) operator against a single-key JSON object, which
+ * maps to the Postgres `@>` operator on a JSONB column.
+ *
+ * Only safe key names (alphanumeric + _ + -) are accepted to guard against
+ * SQL injection.
+ */
+const SAFE_METADATA_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function applyMetadataFilters(query, rawQuery) {
+  const metadataParam = rawQuery.metadata;
+  if (!metadataParam || typeof metadataParam !== "object" || Array.isArray(metadataParam)) {
+    return query;
+  }
+  for (const [key, value] of Object.entries(metadataParam)) {
+    if (!SAFE_METADATA_KEY_RE.test(key)) continue;
+    if (typeof value !== "string") continue;
+    // Use JSONB containment: metadata @> '{"key": "value"}'
+    query = query.filter("metadata", "cs", JSON.stringify({ [key]: value }));
+  }
+  return query;
+}
 
 function createPaymentsRouter({
   verifyPaymentRateLimit = defaultVerifyPaymentRateLimit,
@@ -129,6 +178,9 @@ function createPaymentsRouter({
    *                 enum: [text, id, hash, return]
    *               webhook_url:
    *                 type: string
+   *               client_id:
+   *                 type: string
+   *                 description: Merchant-defined client/store identifier for segmentation
    *               branding_overrides:
    *                 type: object
    *                 properties:
@@ -216,7 +268,9 @@ function createPaymentsRouter({
         }
       }
 
-      const paymentId = randomUUID();
+      const isSandbox = body.sandbox === true;
+      const baseId = randomUUID();
+      const paymentId = isSandbox ? `test_${baseId}` : baseId;
       const now = new Date().toISOString();
       const paymentLinkBase =
         process.env.PAYMENT_LINK_BASE || "http://localhost:3000";
@@ -243,9 +297,11 @@ function createPaymentsRouter({
         memo: body.memo || null,
         memo_type: body.memo_type || null,
         webhook_url: body.webhook_url || null,
+        client_id: body.client_id || null,
         status: "pending",
         tx_id: null,
         metadata,
+        sandbox: isSandbox,
         created_at: now,
       };
 
@@ -258,13 +314,16 @@ function createPaymentsRouter({
         throw insertError;
       }
 
-      // Record metric for payment creation
-      paymentCreatedCounter.inc({ asset: body.asset });
+      // Only record production metrics for non-sandbox payments.
+      if (!isSandbox) {
+        paymentCreatedCounter.inc({ asset: body.asset });
+      }
 
       res.status(201).json({
         payment_id: paymentId,
         payment_link: paymentLink,
         status: "pending",
+        sandbox: isSandbox,
         branding_config: resolvedBrandingConfig,
       });
     } catch (err) {
@@ -420,11 +479,7 @@ function createPaymentsRouter({
         let query = supabase
           .from("payments")
           .select(
-
-            "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, notification_email, business_name)",
-          )
-
-            "id, merchant_id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, webhook_version, webhook_custom_headers, notification_email, email)"
+            "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, webhook_version, webhook_custom_headers, notification_email, email, business_name, subscribed_events)"
           );
 
         if (req.merchant?.id) {
@@ -528,13 +583,16 @@ function createPaymentsRouter({
             tx_id: match.transaction_hash,
           }
         );
-        const webhookResult = await sendWebhook(
-          data.webhook_url,
-          webhookPayload,
-          merchantSecret,
-          data.id,
-          data.merchants?.webhook_custom_headers ?? {}
-        );
+        let webhookResult = { ok: true, skipped: true };
+        if (isEventSubscribed(data.merchants, "payment.confirmed")) {
+          webhookResult = await sendWebhook(
+            data.webhook_url,
+            webhookPayload,
+            merchantSecret,
+            data.id,
+            data.merchants?.webhook_custom_headers ?? {}
+          );
+        }
         sendReceiptEmail({
           to: data.merchants?.notification_email,
           businessName: data.merchants?.business_name || "Merchant",
@@ -609,6 +667,11 @@ function createPaymentsRouter({
    *           type: integer
    *           default: 10
    *         description: Number of results per page (max 100)
+   *       - in: query
+   *         name: client_id
+   *         schema:
+   *           type: string
+   *         description: Filter payments by merchant-defined client identifier
    *     responses:
    *       200:
    *         description: Paginated payments
@@ -629,22 +692,43 @@ function createPaymentsRouter({
    *                   type: integer
    *                 limit:
    *                   type: integer
+   *                 links:
+   *                   type: object
+   *                   properties:
+   *                     next:
+   *                       type: string
+   *                       description: URL to the next page
+   *                     previous:
+   *                       type: string
+   *                       description: URL to the previous page
    *       401:
    *         description: Missing or invalid API key
    */
   router.get("/payments", validateRequest({ query: paginationQuerySchema }), async (req, res, next) => {
     try {
-      let page = req.query.page;
-      let limit = req.query.limit;
+      let page = parseInt(req.query.page, 10) || 1;
+      let limit = parseInt(req.query.limit, 10) || 10;
+      const clientId =
+        typeof req.query.client_id === "string" && req.query.client_id.trim()
+          ? req.query.client_id.trim()
+          : null;
+
+      if (page < 1) page = 1;
+      if (limit < 1) limit = 1;
+      if (limit > 100) limit = 100;
 
       const offset = (page - 1) * limit;
 
       let countQuery = supabase
         .from("payments")
         .select("*", { count: "exact", head: true })
-        .eq("merchant_id", req.merchant.id);
-
+        .eq("merchant_id", req.merchant.id)
+        .is("deleted_at", null);
+      if (clientId) {
+        countQuery = countQuery.eq("client_id", clientId);
+      }
       countQuery = applyPaymentFilters(countQuery, req);
+      countQuery = applyMetadataFilters(countQuery, req.query);
 
       const { count: totalCount, error: countError } = await countQuery;
 
@@ -656,15 +740,20 @@ function createPaymentsRouter({
       let dataQuery = supabase
         .from("payments")
         .select(
-          "id, amount, asset, asset_issuer, recipient, description, status, tx_id, created_at"
+          "id, amount, asset, asset_issuer, recipient, description, client_id, status, tx_id, created_at",
         )
-        .eq("merchant_id", req.merchant.id);
-
+        .eq("merchant_id", req.merchant.id)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false });
+      if (clientId) {
+        dataQuery = dataQuery.eq("client_id", clientId);
+      }
       dataQuery = applyPaymentFilters(dataQuery, req);
-
-      const { data: payments, error: dataError } = await dataQuery
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+      dataQuery = applyMetadataFilters(dataQuery, req.query);
+      const { data: payments, error: dataError } = await dataQuery.range(
+        offset,
+        offset + limit - 1,
+      );
 
       if (dataError) {
         dataError.status = 500;
@@ -679,6 +768,7 @@ function createPaymentsRouter({
         total_pages: totalPages,
         page,
         limit,
+        ...generatePaginationLinks(req, page, limit, totalPages),
       });
     } catch (err) {
       next(err);

@@ -235,6 +235,22 @@ export function sanitizeCustomHeaders(raw) {
 }
 
 /**
+ * Returns true if the merchant has subscribed to the given event type.
+ *
+ * When `subscribed_events` is null, undefined, or an empty array the merchant
+ * receives ALL event types (backward-compatible default).
+ *
+ * @param {object} merchant  - Merchant record (may include subscribed_events).
+ * @param {string} eventType - Event type to check, e.g. "payment.confirmed".
+ * @returns {boolean}
+ */
+export function isEventSubscribed(merchant, eventType) {
+  const list = merchant?.subscribed_events;
+  if (!Array.isArray(list) || list.length === 0) return true;
+  return list.includes(eventType);
+}
+
+/**
  * Sends a signed webhook POST request to `url`.
  *
  * @param {string}  url           Destination URL.

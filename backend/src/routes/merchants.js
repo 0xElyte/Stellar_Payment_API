@@ -11,6 +11,7 @@ import {
   sessionBrandingSchema,
   webhookSettingsSchema,
   testWebhookSchema,
+  VALID_WEBHOOK_EVENTS,
 } from "../lib/request-schemas.js";
 import { merchantService } from "../services/merchantService.js";
 import {
@@ -460,7 +461,7 @@ function createMerchantsRouter({
     try {
       const { data, error } = await supabase
         .from("merchants")
-        .select("webhook_url, webhook_secret, metadata")
+        .select("webhook_url, webhook_secret, subscribed_events, metadata")
         .eq("id", req.merchant.id)
         .single();
 
@@ -479,6 +480,8 @@ function createMerchantsRouter({
       res.json({
         webhook_url: data.webhook_url || "",
         webhook_secret_masked: maskedSecret,
+        subscribed_events: data.subscribed_events ?? null,
+        available_events: VALID_WEBHOOK_EVENTS,
         webhook_domain_verification: readWebhookDomainVerification(
           data.metadata,
           data.webhook_url || "",
@@ -523,6 +526,9 @@ function createMerchantsRouter({
         const updatePayload = { webhook_url: body.webhook_url || null };
         if ("custom_headers" in body) {
           updatePayload.webhook_custom_headers = body.custom_headers ?? null;
+        }
+        if ("subscribed_events" in body) {
+          updatePayload.subscribed_events = body.subscribed_events ?? null;
         }
         const { data: existing, error: existingError } = await supabase
           .from("merchants")
