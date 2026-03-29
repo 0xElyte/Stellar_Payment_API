@@ -5,6 +5,7 @@ import { useLocale } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMerchantApiKey } from "@/lib/merchant-store";
 import { localeToLanguageTag } from "@/i18n/config";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 interface PaymentDetails {
   id: string;
@@ -175,17 +176,32 @@ export default function PaymentDetailsSheet({
                           } />
                           <DetailItem label="Amount" value={`${payment.amount} ${payment.asset}`} />
                           <DetailItem label="Created At" value={new Date(payment.created_at).toLocaleString(locale)} />
-                          <DetailItem label="Transaction ID" value={payment.tx_id ? (
-                            <a 
-                              href={`https://stellar.expert/explorer/testnet/tx/${payment.tx_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-mint hover:underline break-all font-mono text-[10px]"
-                            >
-                              {payment.tx_id}
-                            </a>
-                          ) : "Pending"} />
+                          <DetailItem 
+                            label={
+                              <InfoTooltip content="A unique 64-character hash representing this specific transaction on the Stellar network.">
+                                Transaction ID
+                              </InfoTooltip>
+                            } 
+                            value={payment.tx_id ? (
+                              <a 
+                                href={`https://stellar.expert/explorer/testnet/tx/${payment.tx_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-mint hover:underline break-all font-mono text-[10px]"
+                              >
+                                {payment.tx_id}
+                              </a>
+                            ) : "Pending"} 
+                          />
                         </div>
+                        <DetailItem 
+                          label={
+                            <InfoTooltip content="The Stellar account address that issued the asset. XLM is native and has no issuer.">
+                              Asset Issuer
+                            </InfoTooltip>
+                          } 
+                          value={<code className="text-[10px] break-all text-slate-300">{payment.asset_issuer || "Native (Stellar Network)"}</code>} 
+                        />
                         <DetailItem label="Recipient" value={<code className="text-[10px] break-all text-slate-300">{payment.recipient}</code>} />
                         <DetailItem label="Description" value={payment.description || "No description"} />
                         
@@ -256,10 +272,10 @@ export default function PaymentDetailsSheet({
   );
 }
 
-function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailItem({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{label}</p>
+      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{label}</div>
       <div className="text-sm text-slate-200">{value}</div>
     </div>
   );
