@@ -14,6 +14,7 @@ import {
   VALID_WEBHOOK_EVENTS,
 } from "../lib/request-schemas.js";
 import { merchantService } from "../services/merchantService.js";
+import { renderReceiptEmail } from "../lib/email-templates.js";
 import {
   createWebhookDomainVerificationState,
   readWebhookDomainVerification,
@@ -358,6 +359,62 @@ function createMerchantsRouter({
         res.json({ branding_config: data.branding_config });
       } catch (err) {
         next(err);
+      }
+    },
+  );
+
+  /**
+   * @swagger
+   * /api/preview-receipt:
+   *   post:
+   *     summary: Generate a preview HTML of the email receipt with custom branding
+   *     tags: [Merchants]
+   *     security:
+   *       - ApiKeyAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/BrandingConfig'
+   *     responses:
+   *       200:
+   *         description: HTML preview of the receipt
+   *         content:
+   *           text/html:
+   *             schema:
+   *               type: string
+   */
+  router.post(
+    "/preview-receipt",
+    requireApiKeyAuth(),
+    validateRequest({ body: sessionBrandingSchema }),
+    async (req, res) => {
+      try {
+        const brandingConfig = req.body;
+        
+        // Mock payment details for preview
+        const mockPayment = {
+          id: "preview_12345",
+          amount: 100.5,
+          asset: "USDC",
+          recipient: "GC7H...PREVIEW",
+          tx_id: "tx_preview_hash",
+          created_at: new Date().toISOString(),
+        };
+
+        const html = renderReceiptEmail({
+          payment: mockPayment,
+          merchant: {
+            business_name: req.merchant.business_name,
+            branding_config: brandingConfig,
+          },
+        });
+
+        res.setHeader("Content-Type", "text/html");
+        res.send(html);
+      } catch (err) {
+        res.status(500).json({ error: "Failed to generate preview" });
       }
     },
   );

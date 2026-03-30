@@ -7,6 +7,7 @@ interface BrandingConfig {
   primary_color?: string;
   secondary_color?: string;
   background_color?: string;
+  logo_url?: string | null;
 }
 
 interface EmailReceiptPreviewProps {

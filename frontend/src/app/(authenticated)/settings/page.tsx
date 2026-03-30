@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useDropzone } from "react-dropzone";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ const DEFAULT_BRANDING = {
   primary_color: "#5ef2c0",
   secondary_color: "#b8ffe2",
   background_color: "#050608",
+  logo_url: null as string | null,
 };
 
 type SettingsTab = "api" | "branding" | "display" | "webhooks" | "danger";
@@ -230,20 +232,48 @@ export default function SettingsPage() {
 
   const updateBrandingField = (
     key: keyof typeof DEFAULT_BRANDING,
-    value: string,
+    value: string | null,
   ) => {
     setBranding((current) => ({
       ...current,
-      [key]: normalizeHexInput(value),
+      [key]: key === "logo_url" ? value : normalizeHexInput(value as string),
     }));
   };
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Image size must be less than 2MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateBrandingField("logo_url", reader.result as string);
+      toast.success("Logo uploaded!");
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "image/png": [".png"],
+      "image/jpeg": [".jpg", ".jpeg"],
+      "image/svg+xml": [".svg"],
+    },
+    multiple: false,
+  });
 
   const saveBranding = async () => {
     if (!apiKey) return;
     setBrandingError(null);
 
-    for (const [key, color] of Object.entries(branding)) {
-      if (!HEX_COLOR_REGEX.test(color as string)) {
+    for (const [key, value] of Object.entries(branding)) {
+      if (key === "logo_url") continue;
+      if (!HEX_COLOR_REGEX.test(value as string)) {
         setBrandingError(`${key} must be a valid hex color`);
         return;
       }
@@ -707,9 +737,78 @@ export default function SettingsPage() {
                 Checkout Branding
               </h2>
               <p className="text-sm text-slate-500">
-                Set default checkout colors. These values are exposed as CSS
-                variables and can be overridden per session.
+                Set default checkout branding. Upload your logo and set colors.
               </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                Store Logo
+              </span>
+              <div
+                {...getRootProps()}
+                className={`relative flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-all ${
+                  isDragActive
+                    ? "border-mint bg-mint/5"
+                    : "border-white/10 bg-black/20 hover:border-white/20 hover:bg-black/30"
+                }`}
+              >
+                <input {...getInputProps()} />
+                {branding.logo_url ? (
+                  <div className="group relative flex flex-col items-center gap-3 p-4">
+                    <img
+                      src={branding.logo_url}
+                      alt="Logo preview"
+                      className="h-16 w-16 object-contain"
+                    />
+                    <span className="text-xs text-slate-500 group-hover:text-slate-300">
+                      Click or drag to change logo
+                    </span>
+                    {isDragActive && (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/60 backdrop-blur-sm">
+                        <p className="text-sm font-bold text-mint">
+                          Drop to upload
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 p-6 text-center">
+                    <div className="rounded-full bg-white/5 p-3 text-slate-400">
+                      <svg
+                        className="h-6 w-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                        />
+                      </svg>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-medium text-slate-300">
+                        {isDragActive ? "Drop your logo here" : "Upload logo"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        PNG, JPG or SVG up to 2MB
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {branding.logo_url && (
+                <button
+                  type="button"
+                  onClick={() => updateBrandingField("logo_url", null)}
+                  className="self-start text-xs text-red-400 hover:text-red-300"
+                >
+                  Remove logo
+                </button>
+              )}
             </div>
 
             {brandingError && (
@@ -775,6 +874,15 @@ export default function SettingsPage() {
                 <p style={{ color: branding.secondary_color }}>
                   Sample checkout card
                 </p>
+                {branding.logo_url && (
+                  <div className="mb-4 flex justify-center">
+                    <img
+                      src={branding.logo_url}
+                      alt="Logo preview"
+                      className="h-12 w-auto object-contain"
+                    />
+                  </div>
+                )}
                 <button
                   type="button"
                   className="mt-3 rounded-lg px-4 py-2 font-semibold"
