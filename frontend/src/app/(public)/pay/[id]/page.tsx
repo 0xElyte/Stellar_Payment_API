@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useWallet } from "@/lib/wallet-context";
 import { Spinner } from "@/components/ui/Spinner";
@@ -401,6 +401,7 @@ export default function PaymentPage() {
   const locale = localeToLanguageTag(useLocale());
   const params = useParams();
   const paymentId = params.id as string;
+  const router = useRouter();
 
   const [payment, setPayment] = useState<PaymentDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -411,6 +412,7 @@ export default function PaymentPage() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [networkFee, setNetworkFee] =
     useState<NetworkFeeResponse["network_fee"] | null>(null);
   const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
@@ -1064,6 +1066,15 @@ export default function PaymentPage() {
                     onConnected={() => {}}
                   />
                 )}
+
+                {/* Cancel Payment Link */}
+                <button
+                  type="button"
+                  onClick={() => setIsCancelModalOpen(true)}
+                  className="mt-2 text-center text-sm font-medium text-slate-500 hover:text-white transition-colors"
+                >
+                  Cancel Payment
+                </button>
               </div>
             )}
 
@@ -1168,6 +1179,37 @@ export default function PaymentPage() {
               style={{ backgroundColor: "var(--checkout-primary)" }}
             >
               {t("confirmPayment")}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isCancelModalOpen}
+        onClose={() => setIsCancelModalOpen(false)}
+        title="Cancel Payment"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-300">
+            Are you sure you want to cancel this payment?
+          </p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setIsCancelModalOpen(false)}
+              className="flex h-11 flex-1 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
+              No, go back
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCancelModalOpen(false);
+                router.push(`/pay/${paymentId}/cancelled`);
+              }}
+              className="flex h-11 flex-1 items-center justify-center rounded-xl bg-red-500/20 text-red-400 border border-red-500/30 px-4 text-sm font-semibold transition hover:bg-red-500/30"
+            >
+              Yes, cancel
             </button>
           </div>
         </div>
